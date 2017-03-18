@@ -1,0 +1,9 @@
+---
+nginx_rtmp_version: "1.6.2-5+deb8u4-rtmp1"
+
+nginx_rtmp_enable_hls: true
+nginx_rtmp_hls_path: /var/www/hls
+nginx_rtmp_enable_dash: true
+nginx_rtmp_dash_path: /var/www/dash
+
+nginx_rtmp_users: []

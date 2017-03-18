@@ -1,0 +1,112 @@
+---
+- name: update apt cache
+  apt:
+    update_cache: yes
+    cache_valid_time: 3600
+
+- name: get the version of the installed nginx package (if any)
+  command: dpkg-query -W -f='${Version}' nginx-extras
+  register: nginx_version
+  failed_when: False
+  changed_when: False
+  check_mode: no
+
+- debug: msg="{{ nginx_rtmp_version }} --- {{ nginx_version.stdout }}"
+
+- name: install the regular nginx package to satisfy dependencies if required
+  apt:
+    name: nginx-extras
+    state: installed
+  when: nginx_version|failed
+
+- name: remove the existing nginx package to avoid conflicts
+  apt:
+    name: "{{ item }}"
+    state: absent
+  with_items:
+    - nginx_extras
+    - nginx-common
+  when: nginx_version|failed or nginx_version.stdout != "{{ nginx_rtmp_version }}"
+
+- name: copy the custom nginx packages to the remote machine
+  copy:
+    src: packages/{{ item }}
+    dest: /tmp/{{ item }}
+  with_items:
+    - nginx-common_{{ nginx_rtmp_version }}_all.deb
+    - nginx-extras_{{ nginx_rtmp_version }}_amd64.deb
+  when: nginx_version|failed or nginx_version.stdout != "{{ nginx_rtmp_version }}"
+
+- name: install the custom nginx packages
+  apt:
+    deb: /tmp/{{ item }}
+  with_items:
+    - nginx-common_{{ nginx_rtmp_version }}_all.deb
+    - nginx-extras_{{ nginx_rtmp_version }}_amd64.deb
+  when: nginx_version|failed or nginx_version.stdout != "{{ nginx_rtmp_version }}"
+
+- name: hold the custom nginx packages
+  dpkg_selections:
+    name: "{{ item }}"
+    selection: hold
+  with_items:
+    - nginx-common
+    - nginx-extras
+
+- name: remove default html directory
+  file:
+    path: /var/www/html
+    state: absent
+
+- name: create nginx content directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: www-data
+    group: www-data
+    mode: 0755
+  with_items:
+  - "{{ nginx_rtmp_hls_path }}"
+  - "{{ nginx_rtmp_dash_path }}"
+
+- name: disable the default site configuration
+  file:
+    path: /etc/nginx/sites-enabled/default
+    state: absent
+  notify: reload nginx
+
+- name: intstall the rtmp configuration
+  template:
+    src: nginx/nginx-rtmp.conf.j2
+    dest: /etc/nginx/nginx-rtmp.conf
+  notify: reload nginx
+
+- name: patch nginx.conf to include the rtmp configuration
+  lineinfile:
+    dest: /etc/nginx/nginx.conf
+    line: "include /etc/nginx/nginx-rtmp.conf;"
+    state: present
+  notify: reload nginx
+
+# https://github.com/arut/nginx-rtmp-module/issues/683
+- name: patch nginx.conf to decrease the workers to 1
+  lineinfile:
+    dest: /etc/nginx/nginx.conf
+    regexp: "^worker_processes\ "
+    line: "worker_processes 1;"
+  notify: reload nginx
+
+- name: install the python-passlib library, as required by the htpasswd module
+  apt:
+    name: python-passlib
+    state: installed
+
+- name: create htpasswd file
+  htpasswd:
+    path: /etc/nginx/htpasswd
+    name: "{{ item.name }}"
+    password: "{{ item.password }}"
+    owner: root
+    group: www-data
+    mode: 0640
+  with_items: "{{ nginx_rtmp_users }}"

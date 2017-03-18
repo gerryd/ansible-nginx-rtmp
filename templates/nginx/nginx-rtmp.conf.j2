@@ -1,0 +1,26 @@
+rtmp_auto_push off;
+
+rtmp {
+	server {
+		listen 127.0.0.1:1935;
+
+		buflen 10s;
+
+		application stream {
+			live on;
+
+			hls on;
+			hls_path /var/www/hls;
+			hls_fragment_naming system;
+			hls_sync 100ms;
+			hls_playlist_length 2m;
+
+			dash on;
+			dash_path /var/www/dash;
+			dash_fragment 15s;
+			dash_playlist_length 2m;
+
+			drop_idle_publisher 20s;
+		}
+	}
+}
